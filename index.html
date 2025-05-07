@@ -1,0 +1,176 @@
+<!DOCTYPE html>
+<html lang="zh">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0"/>
+  <title>日元⇄人民币 汇率查询</title>
+  <script src="https://cdn.jsdelivr.net/npm/chart.js"></script>
+  <style>
+    body {
+      font-family: -apple-system, BlinkMacSystemFont, 'Helvetica Neue', sans-serif;
+      background: #f8f8fa;
+      color: #1c1c1e;
+      text-align: center;
+      padding: 2em;
+    }
+    h1 {
+      font-size: 2rem;
+      color: #007aff;
+    }
+    .rate {
+      font-size: 2.5rem;
+      margin: 0.5em 0;
+    }
+    .input-group {
+      margin: 1em auto;
+      display: flex;
+      justify-content: center;
+      gap: 1em;
+    }
+    input {
+      padding: 0.5em;
+      font-size: 1em;
+      width: 100px;
+      border-radius: 8px;
+      border: 1px solid #ccc;
+    }
+    button {
+      background-color: #007aff;
+      border: none;
+      color: white;
+      padding: 0.5em 1em;
+      border-radius: 10px;
+      font-size: 1em;
+    }
+    canvas {
+      margin-top: 2em;
+      max-width: 100%;
+    }
+  </style>
+</head>
+<body>
+  <h1>日元 ⇄ 人民币 汇率查询</h1>
+  <div id="lastUpdated"></div>
+  <div class="rate" id="rateDisplay">加载中...</div>
+
+  <div class="input-group">
+    <div>
+      <input type="number" id="jpyInput" placeholder="JPY" />
+      <div>日元</div>
+    </div>
+    <div>
+      <input type="number" id="cnyInput" placeholder="CNY" />
+      <div>人民币</div>
+    </div>
+  </div>
+  <button onclick="manualRefresh()">手动刷新汇率</button>
+  <canvas id="chart" width="600" height="300"></canvas>
+
+  <script>
+    let chart;
+    let lastRate = null;
+    const RED_LINE = 0.045; // 汇率预警线
+
+    // 监听输入事件，进行反向换算
+    document.getElementById("jpyInput").addEventListener("input", () => {
+      const jpy = parseFloat(document.getElementById("jpyInput").value);
+      if (!isNaN(jpy) && lastRate) {
+        document.getElementById("cnyInput").value = (jpy * lastRate).toFixed(2);
+      }
+    });
+    document.getElementById("cnyInput").addEventListener("input", () => {
+      const cny = parseFloat(document.getElementById("cnyInput").value);
+      if (!isNaN(cny) && lastRate) {
+        document.getElementById("jpyInput").value = (cny / lastRate).toFixed(2);
+      }
+    });
+
+    const fetchExchangeRate = async () => {
+      try {
+        const now = new Date();
+        const end = now.toISOString().split("T")[0];
+        const start = new Date(now - 7 * 24 * 60 * 60 * 1000).toISOString().split("T")[0];
+        const url = `https://api.frankfurter.app/${start}..${end}?from=JPY&to=CNY`;
+
+        const res = await fetch(url);
+        const data = await res.json();
+        const rates = Object.entries(data.rates);
+
+        const dailyData = rates.map(([date, obj]) => ({
+          time: date,
+          value: obj.CNY,
+        }));
+
+        const latest = dailyData.at(-1).value;
+        updateExchangeInfo(latest);
+        updateChart(dailyData);
+        saveToLocal(latest, dailyData);
+      } catch (e) {
+        alert("汇率获取失败，请检查网络");
+        console.error(e);
+        loadFromLocal();
+      }
+    };
+
+    const updateExchangeInfo = (rate) => {
+      lastRate = rate;
+      document.getElementById("rateDisplay").textContent = `1 日元 ≈ ${rate.toFixed(4)} 人民币`;
+      document.getElementById("lastUpdated").textContent = `更新时间：${new Date().toLocaleTimeString()}`;
+      if (rate < RED_LINE) {
+        alert("⚠️ 汇率低于红线！适合购入！");
+      }
+    };
+
+    const updateChart = (data) => {
+      const ctx = document.getElementById("chart").getContext("2d");
+      const labels = data.map(d => d.time);
+      const values = data.map(d => d.value);
+
+      if (chart) chart.destroy();
+      chart = new Chart(ctx, {
+        type: 'line',
+        data: {
+          labels: labels,
+          datasets: [{
+            label: '近7日汇率走势',
+            data: values,
+            borderColor: '#007aff',
+            fill: false,
+            tension: 0.2,
+            pointRadius: 3
+          }]
+        },
+        options: {
+          responsive: true,
+          scales: {
+            x: { display: true },
+            y: { display: true }
+          }
+        }
+      });
+    };
+
+    const saveToLocal = (rate, history) => {
+      localStorage.setItem("lastRate", rate);
+      localStorage.setItem("historyData", JSON.stringify(history));
+    };
+
+    const loadFromLocal = () => {
+      const rate = localStorage.getItem("lastRate");
+      const history = JSON.parse(localStorage.getItem("historyData") || "[]");
+      if (rate) updateExchangeInfo(parseFloat(rate));
+      if (history.length) updateChart(history);
+    };
+
+    const manualRefresh = () => {
+      fetchExchangeRate();
+    };
+
+    // 初始加载
+    fetchExchangeRate();
+
+    // 每分钟自动更新
+    setInterval(fetchExchangeRate, 60 * 1000);
+  </script>
+</body>
+</html>
